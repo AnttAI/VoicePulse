@@ -184,14 +184,15 @@ function App() {
     const data = await tokenResponse.json();
     logServerEvent(data, "fetch_session_token_response");
 
-    if (!data.client_secret?.value) {
+    const ephemeralKey = data.value ?? data.client_secret?.value ?? null;
+    if (!ephemeralKey) {
       logClientEvent(data, "error.no_ephemeral_key");
       console.error("No ephemeral key provided by the server");
       setSessionStatus("DISCONNECTED");
       return null;
     }
 
-    return data.client_secret.value;
+    return ephemeralKey;
   };
 
   const connectToRealtime = async () => {
@@ -253,7 +254,13 @@ function App() {
         content: [{ type: 'input_text', text }],
       },
     });
-    sendClientEvent({ type: 'response.create' }, '(simulated user text message)');
+    sendClientEvent(
+      {
+        type: 'response.create',
+        response: { output_modalities: ['audio'] },
+      },
+      '(simulated user text message)',
+    );
   };
 
   const updateSession = (shouldTriggerResponse: boolean = false) => {
@@ -270,12 +277,19 @@ function App() {
           create_response: true,
         };
 
-    sendEvent({
-      type: 'session.update',
-      session: {
-        turn_detection: turnDetection,
-      },
-    });
+    if (turnDetection) {
+      sendEvent({
+        type: 'session.update',
+        session: {
+          type: 'realtime',
+          audio: {
+            input: {
+              turn_detection: turnDetection,
+            },
+          },
+        },
+      });
+    }
 
     // Send an initial 'hi' message to trigger the agent to greet the user
     if (shouldTriggerResponse) {
@@ -313,7 +327,13 @@ function App() {
 
     setIsPTTUserSpeaking(false);
     sendClientEvent({ type: 'input_audio_buffer.commit' }, 'commit PTT');
-    sendClientEvent({ type: 'response.create' }, 'trigger response PTT');
+    sendClientEvent(
+      {
+        type: 'response.create',
+        response: { output_modalities: ['audio'] },
+      },
+      'trigger response PTT',
+    );
   };
 
   const onToggleConnection = () => {
