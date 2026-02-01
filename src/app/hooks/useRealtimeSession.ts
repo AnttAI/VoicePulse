@@ -13,6 +13,7 @@ import { SessionStatus } from '../types';
 export interface RealtimeSessionCallbacks {
   onConnectionChange?: (status: SessionStatus) => void;
   onAgentHandoff?: (agentName: string) => void;
+  onTransportEvent?: (event: any) => void;
 }
 
 export interface ConnectOptions {
@@ -63,6 +64,7 @@ export function useRealtimeSession(callbacks: RealtimeSessionCallbacks = {}) {
         break;
       } 
     }
+    callbacks.onTransportEvent?.(event);
   }
 
   const codecParamRef = useRef<string>(

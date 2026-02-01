@@ -15,6 +15,34 @@ For full documentation, guides, and API references, see the official [OpenAI Age
 
 **NOTE:** For a version that does not use the OpenAI Agents SDK, see the [branch without-agents-sdk](https://github.com/openai/openai-realtime-agents/tree/without-agents-sdk).
 
+## Embeddable Widget
+
+You can embed a compact voice agent widget on any static site by adding:
+
+```html
+<script
+  src="https://YOUR_DOMAIN/voicepulse-widget.js"
+  data-host="https://YOUR_DOMAIN"
+  data-agent-config="chatSupervisor"
+  data-title="Voice Assistant"
+  data-position="bottom-right"
+  data-width="360"
+  data-height="520"
+  data-button-label="Talk to us"
+></script>
+```
+
+Options:
+- `data-host`: where this app is hosted (defaults to the script origin)
+- `data-agent-config`: scenario key (e.g. `chatSupervisor`, `customerServiceRetail`)
+- `data-agent-name`: optional agent name to use as root
+- `data-title`: header label
+- `data-position`: `bottom-right` or `bottom-left`
+- `data-width` / `data-height`: widget size in pixels
+- `data-button-label`: launcher button text
+
+The widget loads `/widget` in an iframe and uses `/api/session` for ephemeral keys.
+
 There are two main patterns demonstrated:
 1. **Chat-Supervisor:** A realtime-based chat agent interacts with the user and handles basic tasks, while a more intelligent, text-based supervisor model (e.g., `gpt-4.1`) is used extensively for tool calls and more complex responses. This approach provides an easy onramp and high-quality answers, with a small increase in latency.
 2. **Sequential Handoff:** Specialized agents (powered by realtime api) transfer the user between them to handle specific user intents. This is great for customer service, where user intents can be handled sequentially by specialist models that excel in a specific domains. This helps avoid the model having all instructions and tools in a single agent, which can degrade performance.
