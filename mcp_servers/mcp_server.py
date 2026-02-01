@@ -31,6 +31,10 @@ import os
 from datetime import datetime
 from typing import List, Dict, Optional
 import json
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 mcp = FastMCP("Feedback Survey MCP Server")
 
