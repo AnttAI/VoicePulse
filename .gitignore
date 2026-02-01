@@ -30,6 +30,8 @@ yarn-error.log*
 
 # Ignore all env files except .env.sample
 .env
+mcp_servers/.env
+mcp_servers/credentials.json
 
 
 # vercel
