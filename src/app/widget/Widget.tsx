@@ -15,14 +15,23 @@ import type { SessionStatus } from "@/app/types";
 
 const DEFAULT_TITLE = "Voice Assistant";
 
+function resolveAgentSetKey(agentSetKey: string | null) {
+  if (agentSetKey && allAgentSets[agentSetKey]) return agentSetKey;
+  if (agentSetKey) {
+    const needle = agentSetKey.toLowerCase();
+    const match = Object.keys(allAgentSets).find(
+      (key) => key.toLowerCase() === needle,
+    );
+    if (match) return match;
+  }
+  return defaultAgentSetKey;
+}
+
 function pickAgentSet(
-  agentSetKey: string | null,
+  agentSetKey: string,
   agentName: string | null,
 ): RealtimeAgent[] {
-  const key = agentSetKey && allAgentSets[agentSetKey]
-    ? agentSetKey
-    : defaultAgentSetKey;
-  const agents = [...allAgentSets[key]];
+  const agents = [...allAgentSets[agentSetKey]];
 
   if (agentName) {
     const idx = agents.findIndex((a) => a.name === agentName);
@@ -35,7 +44,7 @@ function pickAgentSet(
   return agents;
 }
 
-function pickCompanyName(agentSetKey: string | null) {
+function pickCompanyName(agentSetKey: string) {
   if (agentSetKey === "customerServiceRetail") return customerServiceRetailCompanyName;
   return chatSupervisorCompanyName;
 }
@@ -45,6 +54,10 @@ export default function Widget() {
   const title = searchParams.get("title") || DEFAULT_TITLE;
   const agentSetKey = searchParams.get("agentConfig");
   const agentName = searchParams.get("agentName");
+  const resolvedAgentSetKey = useMemo(
+    () => resolveAgentSetKey(agentSetKey),
+    [agentSetKey],
+  );
 
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>("DISCONNECTED");
   const [isMuted, setIsMuted] = useState(false);
@@ -69,7 +82,7 @@ export default function Widget() {
     }
   }, [sdkAudioElement]);
 
-  const { connect, disconnect, mute } =
+  const { connect, disconnect, mute, sendEvent } =
     useRealtimeSession({
       onConnectionChange: (s) => setSessionStatus(s as SessionStatus),
       onTransportEvent: (event) => {
@@ -105,6 +118,27 @@ export default function Widget() {
     return data.value ?? data.client_secret?.value ?? null;
   };
 
+  const triggerInitialGreeting = () => {
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `vp-${Date.now()}`;
+
+    sendEvent({
+      type: "conversation.item.create",
+      item: {
+        id,
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hi" }],
+      },
+    });
+    sendEvent({
+      type: "response.create",
+      response: { output_modalities: ["audio"] },
+    });
+  };
+
   const connectToRealtime = async () => {
     if (sessionStatus !== "DISCONNECTED") return;
     setSessionStatus("CONNECTING");
@@ -118,8 +152,10 @@ export default function Widget() {
         return;
       }
 
-      const agents = pickAgentSet(agentSetKey, agentName);
-      const guardrail = createModerationGuardrail(pickCompanyName(agentSetKey));
+      const agents = pickAgentSet(resolvedAgentSetKey, agentName);
+      const guardrail = createModerationGuardrail(
+        pickCompanyName(resolvedAgentSetKey),
+      );
 
       await connect({
         getEphemeralKey: async () => key,
@@ -130,6 +166,7 @@ export default function Widget() {
           addTranscriptBreadcrumb,
         },
       });
+      triggerInitialGreeting();
     } catch (err) {
       console.error("Widget connect error:", err);
       setError("Failed to connect");
