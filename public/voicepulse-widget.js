@@ -26,7 +26,8 @@
   var position = dataset.position || "bottom-right";
   var width = dataset.width || "360";
   var height = dataset.height || "520";
-  var buttonLabel = dataset.buttonLabel || "Talk to us";
+  var buttonLabel = dataset.buttonLabel || "Share your feedback";
+  var inline = dataset.inline === "true" || dataset.inline === "1";
 
   var containerId = "voicepulse-widget";
   if (document.getElementById(containerId)) return;
@@ -34,13 +35,15 @@
   var container = document.createElement("div");
   container.id = containerId;
   container.setAttribute(SCRIPT_ATTR, "true");
-  document.body.appendChild(container);
+  var mountNode = inline && script.parentNode ? script.parentNode : document.body;
+  mountNode.appendChild(container);
 
   var style = document.createElement("style");
   style.textContent =
     "#voicepulse-widget{position:fixed;z-index:999999;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}" +
     "#voicepulse-widget.vp-bottom-right{right:20px;bottom:20px}" +
     "#voicepulse-widget.vp-bottom-left{left:20px;bottom:20px}" +
+    "#voicepulse-widget.vp-inline{position:relative;right:auto;left:auto;bottom:auto;display:flex;flex-direction:column;align-items:center;gap:12px}" +
     "#voicepulse-widget .vp-launcher{background:#111;color:#fff;border:0;border-radius:999px;padding:10px 16px;cursor:pointer;font-size:14px;box-shadow:0 10px 30px rgba(0,0,0,.2)}" +
     "#voicepulse-widget .vp-panel{position:fixed;bottom:70px;right:20px;width:" +
     width +
@@ -48,6 +51,7 @@
     height +
     "px;border-radius:16px;overflow:hidden;background:#fff;border:1px solid rgba(0,0,0,.08);box-shadow:0 20px 60px rgba(0,0,0,.25);display:none}" +
     "#voicepulse-widget.vp-bottom-left .vp-panel{left:20px;right:auto}" +
+    "#voicepulse-widget.vp-inline .vp-panel{position:relative;bottom:auto;right:auto;left:auto;margin-top:8px}" +
     "#voicepulse-widget .vp-panel.vp-open{display:block}" +
     "#voicepulse-widget .vp-panel-header{height:36px;background:#0b0b0b;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 10px;font-size:12px}" +
     "#voicepulse-widget .vp-close{background:transparent;border:0;color:#fff;cursor:pointer;font-size:16px;line-height:1}" +
@@ -89,7 +93,7 @@
   container.appendChild(panel);
 
   var posClass = position === "bottom-left" ? "vp-bottom-left" : "vp-bottom-right";
-  container.className = posClass;
+  container.className = inline ? "vp-inline" : posClass;
 
   function openPanel() {
     panel.classList.add("vp-open");

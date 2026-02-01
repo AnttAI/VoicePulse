@@ -13,7 +13,7 @@ import { customerServiceRetailCompanyName } from "@/app/agentConfigs/customerSer
 import type { RealtimeAgent } from "@openai/agents/realtime";
 import type { SessionStatus } from "@/app/types";
 
-const DEFAULT_TITLE = "Voice Assistant";
+const DEFAULT_TITLE = "Voice Pulse";
 
 function resolveAgentSetKey(agentSetKey: string | null) {
   if (agentSetKey && allAgentSets[agentSetKey]) return agentSetKey;
@@ -234,7 +234,7 @@ export default function Widget() {
       : "Connect to begin";
 
   return (
-    <div className="vp-widget h-screen w-screen text-gray-900 flex flex-col bg-gradient-to-b from-emerald-50 via-white to-white">
+    <div className="vp-widget relative h-screen w-screen text-gray-900 flex flex-col bg-gradient-to-b from-emerald-50 via-white to-white">
       <style jsx global>{`
         @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap");
         .vp-widget {
@@ -243,48 +243,40 @@ export default function Widget() {
         }
       `}</style>
 
-      <header className="px-4 py-3 flex items-center justify-between">
-        <div className="text-sm font-semibold tracking-wide">{title}</div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            aria-label={
-              sessionStatus === "CONNECTED"
-                ? "Disconnect"
-                : sessionStatus === "CONNECTING"
-                ? "Connecting"
-                : "Connect"
-            }
-            title={
-              sessionStatus === "CONNECTED"
-                ? "Disconnect"
-                : sessionStatus === "CONNECTING"
-                ? "Connecting…"
-                : "Connect"
-            }
-            disabled={sessionStatus === "CONNECTING"}
-            onClick={() => {
-              if (sessionStatus === "CONNECTED") {
-                disconnectFromRealtime();
-              } else if (sessionStatus === "DISCONNECTED") {
-                connectToRealtime();
-              }
-            }}
-            className="inline-flex items-center justify-center"
-          >
-            <span
-              className={`inline-block h-2.5 w-2.5 rounded-full ring-4 ring-white transition ${
-                sessionStatus === "CONNECTED" ? "bg-emerald-500" : "bg-rose-500"
-              }`}
-            />
-          </button>
-        </div>
-      </header>
+      <button
+        type="button"
+        aria-label={
+          sessionStatus === "CONNECTED"
+            ? "Disconnect"
+            : sessionStatus === "CONNECTING"
+            ? "Connecting"
+            : "Connect"
+        }
+        title={
+          sessionStatus === "CONNECTED"
+            ? "Disconnect"
+            : sessionStatus === "CONNECTING"
+            ? "Connecting…"
+            : "Connect"
+        }
+        disabled={sessionStatus === "CONNECTING"}
+        onClick={() => {
+          if (sessionStatus === "CONNECTED") {
+            disconnectFromRealtime();
+          } else if (sessionStatus === "DISCONNECTED") {
+            connectToRealtime();
+          }
+        }}
+        className="absolute right-4 top-4 inline-flex items-center justify-center"
+      >
+        <span
+          className={`inline-block h-2.5 w-2.5 rounded-full ring-4 ring-white transition ${
+            sessionStatus === "CONNECTED" ? "bg-emerald-500" : "bg-rose-500"
+          }`}
+        />
+      </button>
 
-      <div className="flex-1 px-5 pb-4 flex flex-col items-center justify-center text-center gap-4">
-        <div className="text-xs uppercase tracking-[0.3em] text-emerald-700/70">
-          Voice Agent
-        </div>
+      <div className="flex-1 px-5 pt-10 pb-4 flex flex-col items-center justify-center text-center gap-4">
         <div className="text-lg font-semibold text-gray-900">
           {sessionStatus === "CONNECTED"
             ? "You’re live"
