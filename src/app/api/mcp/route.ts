@@ -25,10 +25,12 @@ export async function POST(request: NextRequest) {
 
     // Map tool names to MCP server endpoints
     const toolEndpoints: Record<string, string> = {
+      start_new_session: '/tools/start_new_session',
       fetch_questions: '/tools/fetch_questions',
       save_response: '/tools/save_response',
       get_all_responses: '/tools/get_all_responses',
       clear_all_responses: '/tools/clear_all_responses',
+      clear_session_responses: '/tools/clear_session_responses',
       update_sheet_id: '/tools/update_sheet_id',
     };
 
