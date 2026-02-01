@@ -5,22 +5,30 @@ This MCP server connects to any Google Sheet provided by an organizer.
 The agent determines when to ask questions and handles all user interaction.
 
 Google Sheet Structure (provided by organizer):
-- Column A: Question ID (e.g., Q1, Q2, Q3...)
+- Column A: Question Number (1, 2, 3...)
 - Column B: Question Text
-- Column C: Response (filled by this server)
+- Column C onwards: Responses from different survey sessions
 
 How it works:
-- Master questions are stored in the first N rows (Q1, Q2, Q3, etc.)
-- Each new survey session appends new rows below the master questions
-- Each response creates a new row: [question_id, question_text, response]
-- No timestamps - just clean question and response data
-- Multiple survey sessions = multiple rows per question ID
+- Questions are FIXED in rows (never duplicated)
+- Each new survey session adds responses in the NEXT AVAILABLE COLUMN
+- Session 1 responses → Column C
+- Session 2 responses → Column D
+- Session 3 responses → Column E
+- And so on...
+
+Example:
+| A | B                          | C       | D          | E       |
+|---|----------------------------|---------|------------|---------|
+| 1 | How would you rate us?     | 8       | 9          | 7       |
+| 2 | What did you like?         | Fast    | Easy       | Great   |
+| 3 | What could we improve?     | Nothing | More options| UI     |
 
 Tools provided:
-- fetch_questions: Get master questions from the sheet
-- save_response: Save a response (always appends new row)
+- fetch_questions: Get questions from the sheet
+- save_response: Save a response (finds next available column)
 - get_all_responses: Retrieve all responses from the sheet
-- clear_all_responses: Clear all response rows (keeps master questions)
+- clear_session_responses: Clear a specific session's responses
 - update_sheet_id: Change to a different sheet
 
 Setup:
@@ -51,6 +59,9 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 # Global service instance
 sheets_service = None
 
+# Session tracking - maps sheet_name to current session column
+current_sessions = {}
+
 
 def get_sheets_service():
     """Initialize and return Google Sheets service"""
@@ -71,10 +82,19 @@ def get_sheets_service():
         raise
 
 
+def column_number_to_letter(n):
+    """Convert column number to letter (1='A', 2='B', etc.)"""
+    string = ""
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        string = chr(65 + remainder) + string
+    return string
+
+
 # ---------------- FETCH QUESTIONS ----------------
 async def _fetch_questions_impl(sheet_name: str = "Sheet1") -> dict:
     """
-    Fetch all master questions from the Google Sheet
+    Fetch all questions from the Google Sheet
 
     The agent uses this to get questions and then asks them conversationally.
 
@@ -82,7 +102,7 @@ async def _fetch_questions_impl(sheet_name: str = "Sheet1") -> dict:
         sheet_name: Name of the sheet tab (default: "Sheet1")
 
     Returns:
-        Dictionary containing list of master questions with their IDs
+        Dictionary containing list of questions with their numbers
     """
     try:
         service = get_sheets_service()
@@ -102,21 +122,14 @@ async def _fetch_questions_impl(sheet_name: str = "Sheet1") -> dict:
                 "message": "No questions found in the sheet"
             }
 
-        # Get unique questions (master question list)
-        seen_ids = set()
         questions = []
-
         for i, row in enumerate(values, start=1):
             if len(row) >= 2:
-                question_id = row[0]
-                # Only include each question ID once (the first occurrence is the master)
-                if question_id not in seen_ids:
-                    seen_ids.add(question_id)
-                    questions.append({
-                        "row": i,
-                        "question_id": question_id,
-                        "question_text": row[1]
-                    })
+                questions.append({
+                    "row": i,
+                    "question_number": row[0],
+                    "question_text": row[1]
+                })
 
         return {
             "status": "success",
@@ -139,106 +152,25 @@ async def fetch_questions(sheet_name: str = "Sheet1") -> dict:
     return await _fetch_questions_impl(sheet_name)
 
 
-# ---------------- SAVE RESPONSE ----------------
-async def _save_response_impl(
-    question_id: str,
-    response: str,
-    sheet_name: str = "Sheet1"
-) -> dict:
+# ---------------- START NEW SESSION ----------------
+async def _start_new_session_impl(sheet_name: str = "Sheet1") -> dict:
     """
-    Save a user's response to a specific question in the Google Sheet
+    Start a new survey session - finds the next available column
 
-    Behavior:
-    - ALWAYS appends a new row with [question_id, question_text, response]
-    - Each survey session creates new rows (no overwriting)
-    - No timestamps stored
-
-    Args:
-        question_id: The ID of the question (e.g., "Q1", "Q2")
-        response: The user's response text to save
-        sheet_name: Name of the sheet tab (default: "Sheet1")
-
-    Returns:
-        Dictionary with success status and details
-    """
-    try:
-        service = get_sheets_service()
-
-        # Find the question text from the master questions
-        range_name = f"{sheet_name}!A:B"
-        result = service.spreadsheets().values().get(
-            spreadsheetId=GOOGLE_SHEET_ID,
-            range=range_name
-        ).execute()
-
-        values = result.get('values', [])
-        question_text = ""
-
-        for row in values:
-            if row and len(row) >= 2 and row[0] == question_id:
-                question_text = row[1]
-                break
-
-        if not question_text:
-            return {
-                "status": "error",
-                "message": f"Question ID '{question_id}' not found in sheet"
-            }
-
-        # Append a new row with [question_id, question_text, response]
-        append_body = {'values': [[question_id, question_text, response]]}
-
-        append_result = service.spreadsheets().values().append(
-            spreadsheetId=GOOGLE_SHEET_ID,
-            range=f"{sheet_name}!A:C",
-            valueInputOption='RAW',
-            insertDataOption='INSERT_ROWS',
-            body=append_body
-        ).execute()
-
-        return {
-            "status": "success",
-            "question_id": question_id,
-            "question_text": question_text,
-            "response": response,
-            "message": f"Appended new row with response for {question_id}"
-        }
-
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to save response: {str(e)}"
-        }
-
-
-@mcp.tool
-async def save_response(
-    question_id: str,
-    response: str,
-    sheet_name: str = "Sheet1"
-) -> dict:
-    """MCP tool wrapper for save_response"""
-    return await _save_response_impl(question_id, response, sheet_name)
-
-
-# ---------------- GET ALL RESPONSES ----------------
-async def _get_all_responses_impl(sheet_name: str = "Sheet1") -> dict:
-    """
-    Retrieve all questions and their responses from the Google Sheet
-
-    The agent can use this to check progress or get all collected responses.
+    Call this at the start of each new survey to ensure responses
+    go into the correct session column.
 
     Args:
         sheet_name: Name of the sheet tab (default: "Sheet1")
 
     Returns:
-        Dictionary containing all questions with their responses
+        Dictionary with session information
     """
     try:
         service = get_sheets_service()
 
-        # Read all data from columns A to C
-        range_name = f"{sheet_name}!A:C"
+        # Get all data to find the next empty column
+        range_name = f"{sheet_name}!A:ZZ"
         result = service.spreadsheets().values().get(
             spreadsheetId=GOOGLE_SHEET_ID,
             range=range_name
@@ -252,25 +184,207 @@ async def _get_all_responses_impl(sheet_name: str = "Sheet1") -> dict:
                 "message": "No data found in the sheet"
             }
 
+        # Find the maximum column used (should be at least column B for questions)
+        max_cols = max(len(row) for row in values) if values else 2
+
+        # Next available column is max_cols + 1
+        # If max_cols is 2 (just A and B), next session is column C (index 3)
+        next_col_index = max_cols + 1
+        next_col_letter = column_number_to_letter(next_col_index)
+        session_number = next_col_index - 2  # Column C = Session 1, D = Session 2, etc.
+
+        # Store the current session for this sheet
+        current_sessions[sheet_name] = next_col_index
+
+        return {
+            "status": "success",
+            "sheet_name": sheet_name,
+            "session_number": session_number,
+            "session_column": next_col_letter,
+            "session_column_index": next_col_index,
+            "message": f"Started new session {session_number} in column {next_col_letter}"
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to start new session: {str(e)}"
+        }
+
+
+@mcp.tool
+async def start_new_session(sheet_name: str = "Sheet1") -> dict:
+    """MCP tool wrapper for start_new_session"""
+    return await _start_new_session_impl(sheet_name)
+
+
+# ---------------- SAVE RESPONSE ----------------
+async def _save_response_impl(
+    question_number: str,
+    response: str,
+    sheet_name: str = "Sheet1"
+) -> dict:
+    """
+    Save a user's response to a specific question in the Google Sheet
+
+    Behavior:
+    - Finds the question by question_number in Column A
+    - Uses the CURRENT SESSION COLUMN (set by start_new_session)
+    - Writes the response to that specific column for this question
+
+    Args:
+        question_number: The number of the question (e.g., "1", "2", "3")
+        response: The user's response text to save
+        sheet_name: Name of the sheet tab (default: "Sheet1")
+
+    Returns:
+        Dictionary with success status and details
+    """
+    try:
+        service = get_sheets_service()
+
+        # Check if a session has been started
+        if sheet_name not in current_sessions:
+            # Auto-start a new session if not already started
+            session_result = await _start_new_session_impl(sheet_name)
+            if session_result.get('status') == 'error':
+                return session_result
+
+        # Get the current session column for this sheet
+        session_col_index = current_sessions[sheet_name]
+        session_col_letter = column_number_to_letter(session_col_index)
+
+        # Find the row for this question_number
+        range_name = f"{sheet_name}!A:A"
+        result = service.spreadsheets().values().get(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=range_name
+        ).execute()
+
+        values = result.get('values', [])
+        question_row = None
+
+        for i, row in enumerate(values, start=1):
+            if row and str(row[0]) == str(question_number):
+                question_row = i
+                break
+
+        if question_row is None:
+            return {
+                "status": "error",
+                "message": f"Question number '{question_number}' not found in sheet"
+            }
+
+        # Get the question text
+        row_range = f"{sheet_name}!B{question_row}"
+        row_result = service.spreadsheets().values().get(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=row_range
+        ).execute()
+
+        row_data = row_result.get('values', [[]])[0]
+        question_text = row_data[0] if len(row_data) > 0 else ""
+
+        # Write response to the CURRENT SESSION column
+        cell_range = f"{sheet_name}!{session_col_letter}{question_row}"
+        response_body = {
+            'values': [[response]]
+        }
+
+        service.spreadsheets().values().update(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=cell_range,
+            valueInputOption='RAW',
+            body=response_body
+        ).execute()
+
+        return {
+            "status": "success",
+            "question_number": question_number,
+            "question_text": question_text,
+            "response": response,
+            "column": session_col_letter,
+            "session_column": session_col_index - 2,  # 1 = Session 1 (Column C), 2 = Session 2 (Column D), etc.
+            "message": f"Response saved in column {session_col_letter} (Session {session_col_index - 2}) for Question {question_number}"
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to save response: {str(e)}"
+        }
+
+
+@mcp.tool
+async def save_response(
+    question_number: str,
+    response: str,
+    sheet_name: str = "Sheet1"
+) -> dict:
+    """MCP tool wrapper for save_response"""
+    return await _save_response_impl(question_number, response, sheet_name)
+
+
+# ---------------- GET ALL RESPONSES ----------------
+async def _get_all_responses_impl(sheet_name: str = "Sheet1") -> dict:
+    """
+    Retrieve all questions and their responses from the Google Sheet
+
+    The agent can use this to check progress or get all collected responses.
+
+    Args:
+        sheet_name: Name of the sheet tab (default: "Sheet1")
+
+    Returns:
+        Dictionary containing all questions with their responses across all sessions
+    """
+    try:
+        service = get_sheets_service()
+
+        # Read all data from the sheet
+        range_name = f"{sheet_name}!A:ZZ"
+        result = service.spreadsheets().values().get(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=range_name
+        ).execute()
+
+        values = result.get('values', [])
+
+        if not values:
+            return {
+                "status": "error",
+                "message": "No data found in the sheet"
+            }
+
+        # Determine number of sessions (columns C onwards that have data)
+        max_cols = max(len(row) for row in values) if values else 0
+        num_sessions = max(0, max_cols - 2)  # Subtract columns A and B
+
         responses = []
         for row in values:
             question_data = {
-                "question_id": row[0] if len(row) > 0 else "",
+                "question_number": row[0] if len(row) > 0 else "",
                 "question_text": row[1] if len(row) > 1 else "",
-                "response": row[2] if len(row) > 2 else ""
+                "responses": []
             }
-            responses.append(question_data)
 
-        answered = sum(1 for r in responses if r["response"])
+            # Collect all session responses for this question
+            for i in range(2, len(row)):
+                if row[i]:  # Only include non-empty responses
+                    question_data["responses"].append({
+                        "session": i - 1,  # Session 1, 2, 3, etc.
+                        "response": row[i]
+                    })
+
+            responses.append(question_data)
 
         return {
             "status": "success",
             "sheet_id": GOOGLE_SHEET_ID,
             "sheet_name": sheet_name,
             "total_questions": len(responses),
-            "answered": answered,
-            "unanswered": len(responses) - answered,
-            "responses": responses
+            "total_sessions": num_sessions,
+            "questions": responses
         }
 
     except Exception as e:
@@ -286,14 +400,13 @@ async def get_all_responses(sheet_name: str = "Sheet1") -> dict:
     return await _get_all_responses_impl(sheet_name)
 
 
-# ---------------- CLEAR ALL RESPONSES ----------------
-async def _clear_all_responses_impl(sheet_name: str = "Sheet1", confirm: bool = False) -> dict:
+# ---------------- CLEAR SESSION RESPONSES ----------------
+async def _clear_session_responses_impl(session_number: int, sheet_name: str = "Sheet1", confirm: bool = False) -> dict:
     """
-    Clear all response rows from the Google Sheet (keeps master questions intact)
-
-    Useful for testing or resetting the sheet.
+    Clear responses from a specific session column
 
     Args:
+        session_number: Session number to clear (1 = Column C, 2 = Column D, etc.)
         sheet_name: Name of the sheet tab (default: "Sheet1")
         confirm: Must be set to True to actually clear responses (safety feature)
 
@@ -303,14 +416,18 @@ async def _clear_all_responses_impl(sheet_name: str = "Sheet1", confirm: bool = 
     if not confirm:
         return {
             "status": "error",
-            "message": "Please set confirm=True to clear all responses. This action cannot be undone."
+            "message": "Please set confirm=True to clear session responses. This action cannot be undone."
         }
 
     try:
         service = get_sheets_service()
 
-        # Get all data
-        range_name = f"{sheet_name}!A:C"
+        # Calculate column letter (Session 1 = Column C = index 3)
+        col_index = session_number + 2
+        col_letter = column_number_to_letter(col_index)
+
+        # Get number of rows
+        range_name = f"{sheet_name}!A:A"
         result = service.spreadsheets().values().get(
             spreadsheetId=GOOGLE_SHEET_ID,
             range=range_name
@@ -325,49 +442,32 @@ async def _clear_all_responses_impl(sheet_name: str = "Sheet1", confirm: bool = 
                 "message": "No data found in sheet"
             }
 
-        # Find master questions (first occurrence of each question ID)
-        seen_ids = set()
-        master_row_count = 0
+        # Clear the entire column for that session
+        clear_range = f"{sheet_name}!{col_letter}1:{col_letter}{num_rows}"
 
-        for row in values:
-            if len(row) > 0:
-                question_id = row[0]
-                if question_id not in seen_ids:
-                    seen_ids.add(question_id)
-                    master_row_count += 1
+        service.spreadsheets().values().clear(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=clear_range
+        ).execute()
 
-        # Clear all rows after the master questions
-        if num_rows > master_row_count:
-            clear_range = f"{sheet_name}!A{master_row_count + 1}:C{num_rows}"
-
-            service.spreadsheets().values().clear(
-                spreadsheetId=GOOGLE_SHEET_ID,
-                range=clear_range
-            ).execute()
-
-            return {
-                "status": "success",
-                "message": f"Cleared {num_rows - master_row_count} response rows from the sheet",
-                "rows_cleared": num_rows - master_row_count
-            }
-        else:
-            return {
-                "status": "success",
-                "message": "No response rows to clear (only master questions present)",
-                "rows_cleared": 0
-            }
+        return {
+            "status": "success",
+            "message": f"Cleared session {session_number} responses (Column {col_letter})",
+            "session_number": session_number,
+            "column_cleared": col_letter
+        }
 
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Failed to clear responses: {str(e)}"
+            "message": f"Failed to clear session responses: {str(e)}"
         }
 
 
 @mcp.tool
-async def clear_all_responses(sheet_name: str = "Sheet1", confirm: bool = False) -> dict:
-    """MCP tool wrapper for clear_all_responses"""
-    return await _clear_all_responses_impl(sheet_name, confirm)
+async def clear_session_responses(session_number: int, sheet_name: str = "Sheet1", confirm: bool = False) -> dict:
+    """MCP tool wrapper for clear_session_responses"""
+    return await _clear_session_responses_impl(session_number, sheet_name, confirm)
 
 
 # ---------------- UPDATE SHEET ID ----------------
@@ -427,12 +527,20 @@ async def http_fetch_questions(request: Request):
     return JSONResponse(result)
 
 
+@mcp.custom_route('/tools/start_new_session', methods=['POST'])
+async def http_start_new_session(request: Request):
+    """HTTP endpoint for start_new_session"""
+    body = await request.json()
+    result = await _start_new_session_impl(body.get('sheet_name', 'Sheet1'))
+    return JSONResponse(result)
+
+
 @mcp.custom_route('/tools/save_response', methods=['POST'])
 async def http_save_response(request: Request):
     """HTTP endpoint for save_response"""
     body = await request.json()
     result = await _save_response_impl(
-        question_id=body.get('question_id'),
+        question_number=body.get('question_number'),
         response=body.get('response'),
         sheet_name=body.get('sheet_name', 'Sheet1')
     )
@@ -447,11 +555,12 @@ async def http_get_all_responses(request: Request):
     return JSONResponse(result)
 
 
-@mcp.custom_route('/tools/clear_all_responses', methods=['POST'])
-async def http_clear_all_responses(request: Request):
-    """HTTP endpoint for clear_all_responses"""
+@mcp.custom_route('/tools/clear_session_responses', methods=['POST'])
+async def http_clear_session_responses(request: Request):
+    """HTTP endpoint for clear_session_responses"""
     body = await request.json()
-    result = await _clear_all_responses_impl(
+    result = await _clear_session_responses_impl(
+        session_number=body.get('session_number'),
         sheet_name=body.get('sheet_name', 'Sheet1'),
         confirm=body.get('confirm', False)
     )
