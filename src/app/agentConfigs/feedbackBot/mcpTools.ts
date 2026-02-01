@@ -10,6 +10,73 @@ import { tool } from '@openai/agents/realtime';
 const MCP_PROXY_URL = '/api/mcp';
 
 /**
+ * Tool: start_new_session
+ *
+ * Starts a new survey session - finds the next available column for responses.
+ * Call this at the START of each new survey.
+ */
+export const startNewSession = tool({
+    name: 'start_new_session',
+    description:
+        'Starts a new survey session. Call this at the very beginning of each survey to ensure responses go into the correct column.',
+    parameters: {
+        type: 'object',
+        properties: {
+            sheet_name: {
+                type: 'string',
+                description: 'Name of the sheet tab (default: "Sheet1")',
+            },
+        },
+        required: [],
+        additionalProperties: false,
+    },
+    execute: async (input: any) => {
+        try {
+            const { sheet_name = 'Sheet1' } = input;
+
+            // Call the MCP server via proxy
+            const response = await fetch(MCP_PROXY_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    tool: 'start_new_session',
+                    parameters: { sheet_name },
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`MCP proxy error: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+
+            if (result.status === 'error') {
+                return {
+                    success: false,
+                    error: result.message,
+                };
+            }
+
+            return {
+                success: true,
+                sheet_name: result.sheet_name,
+                session_number: result.session_number,
+                session_column: result.session_column,
+                message: result.message,
+            };
+        } catch (error) {
+            console.error('Error starting new session:', error);
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Unknown error',
+            };
+        }
+    },
+});
+
+/**
  * Tool: fetch_feedback_questions
  *
  * Fetches all feedback questions from Google Sheets via the MCP server.
@@ -87,9 +154,9 @@ export const saveFeedbackResponse = tool({
     parameters: {
         type: 'object',
         properties: {
-            question_id: {
+            question_number: {
                 type: 'string',
-                description: 'The ID of the question (e.g., "Q1", "Q2")',
+                description: 'The number of the question (e.g., "1", "2", "3")',
             },
             response: {
                 type: 'string',
@@ -100,12 +167,12 @@ export const saveFeedbackResponse = tool({
                 description: 'Name of the sheet tab (default: "Sheet1")',
             },
         },
-        required: ['question_id', 'response'],
+        required: ['question_number', 'response'],
         additionalProperties: false,
     },
     execute: async (input: any) => {
         try {
-            const { question_id, response, sheet_name = 'Sheet1' } = input;
+            const { question_number, response, sheet_name = 'Sheet1' } = input;
 
             // Call the MCP server via proxy
             const mcpResponse = await fetch(MCP_PROXY_URL, {
@@ -115,7 +182,7 @@ export const saveFeedbackResponse = tool({
                 },
                 body: JSON.stringify({
                     tool: 'save_response',
-                    parameters: { question_id, response, sheet_name },
+                    parameters: { question_number, response, sheet_name },
                 }),
             });
 
@@ -134,10 +201,11 @@ export const saveFeedbackResponse = tool({
 
             return {
                 success: true,
-                question_id: result.question_id,
-                row: result.row,
+                question_number: result.question_number,
+                question_text: result.question_text,
                 response: result.response,
-                timestamp: result.timestamp,
+                column: result.column,
+                session_column: result.session_column,
                 message: result.message,
             };
         } catch (error) {
