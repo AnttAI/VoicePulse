@@ -22,6 +22,7 @@ import { createModerationGuardrail } from "@/app/agentConfigs/guardrails";
 
 // Agent configs
 import { allAgentSets, defaultAgentSetKey } from "@/app/agentConfigs";
+import { feedbackSurveyScenario } from "@/app/agentConfigs/feedbackSurvey";
 import { customerServiceRetailScenario } from "@/app/agentConfigs/customerServiceRetail";
 import { chatSupervisorScenario } from "@/app/agentConfigs/chatSupervisor";
 import { customerServiceRetailCompanyName } from "@/app/agentConfigs/customerServiceRetail";
@@ -31,6 +32,7 @@ import { feedbackBotScenario } from "@/app/agentConfigs/feedbackBot";
 
 // Map used by connect logic for scenarios defined via the SDK.
 const sdkScenarioMap: Record<string, RealtimeAgent[]> = {
+  feedbackSurvey: feedbackSurveyScenario,
   simpleHandoff: simpleHandoffScenario,
   customerServiceRetail: customerServiceRetailScenario,
   chatSupervisor: chatSupervisorScenario,
