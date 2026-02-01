@@ -13,7 +13,7 @@ export async function GET() {
         body: JSON.stringify({
           session: {
             type: "realtime",
-            model: "gpt-realtime-mini",
+            model: "gpt-4o-realtime-preview-2025-06-03",
             output_modalities: ["audio"],
           },
         }),
