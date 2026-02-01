@@ -32,6 +32,7 @@ yarn-error.log*
 .env
 mcp_servers/.env
 mcp_servers/credentials.json
+hack
 
 
 # vercel
