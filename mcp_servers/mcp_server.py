@@ -172,10 +172,66 @@ async def _save_response_impl(
                 "message": f"Question ID '{question_id}' not found in sheet"
             }
 
-        # Save response to column C and timestamp to column D
+        # Save response: if an existing response is present for this question,
+        # append a new row with the same question_id and question_text so we do
+        # not overwrite historical data. Otherwise, update the existing row.
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Update response (Column C)
+        # Check if column C (response) for this row already has data
+        try:
+            existing_resp_result = service.spreadsheets().values().get(
+                spreadsheetId=GOOGLE_SHEET_ID,
+                range=f"{sheet_name}!C{row_number}"
+            ).execute()
+            existing_values = existing_resp_result.get('values', [])
+            existing_response = existing_values[0][0] if existing_values and len(existing_values[0]) > 0 else ""
+        except Exception:
+            existing_response = ""
+
+        if existing_response:
+            # Fetch question text from column B to copy into the appended row
+            try:
+                qtext_result = service.spreadsheets().values().get(
+                    spreadsheetId=GOOGLE_SHEET_ID,
+                    range=f"{sheet_name}!B{row_number}"
+                ).execute()
+                qtext_vals = qtext_result.get('values', [])
+                question_text = qtext_vals[0][0] if qtext_vals and len(qtext_vals[0]) > 0 else ""
+            except Exception:
+                question_text = ""
+
+            append_body = {
+                'values': [[question_id, question_text, response, timestamp]]
+            }
+
+            append_result = service.spreadsheets().values().append(
+                spreadsheetId=GOOGLE_SHEET_ID,
+                range=f"{sheet_name}!A:D",
+                valueInputOption='RAW',
+                insertDataOption='INSERT_ROWS',
+                body=append_body
+            ).execute()
+
+            # Try to determine the appended row range for the response
+            updated_range = None
+            if isinstance(append_result, dict):
+                updates = append_result.get('updates') or append_result.get('tableRange') or append_result
+                # prefer updates.updatedRange if available
+                if isinstance(updates, dict):
+                    updated_range = updates.get('updatedRange') or updates.get('tableRange')
+
+            return {
+                "status": "success",
+                "question_id": question_id,
+                "appended": True,
+                "append_result": append_result,
+                "response": response,
+                "timestamp": timestamp,
+                "message": f"Existing response detected; appended new row with response for {question_id}",
+                "appended_range": updated_range
+            }
+
+        # No existing response — update response (Column C) and timestamp (Column D)
         response_range = f"{sheet_name}!C{row_number}"
         response_body = {
             'values': [[response]]
@@ -207,7 +263,8 @@ async def _save_response_impl(
             "row": row_number,
             "response": response,
             "timestamp": timestamp,
-            "message": f"Response saved successfully for {question_id}"
+            "message": f"Response saved successfully for {question_id}",
+            "appended": False
         }
 
     except Exception as e:
@@ -295,68 +352,93 @@ async def get_all_responses(sheet_name: str = "Sheet1") -> dict:
 
 
 # ---------------- CLEAR ALL RESPONSES ----------------
-async def _clear_all_responses_impl(sheet_name: str = "Sheet1", confirm: bool = False) -> dict:
+async def _clear_all_responses_impl(
+    sheet_name: str = "Sheet1",
+    confirm: bool = False,
+    new_sheet_id: Optional[str] = None
+) -> dict:
     """
-    Clear all responses from the Google Sheet (keeps questions intact)
+    Instead of wiping collected data, optionally copy only the questions (columns A and B)
+    to another spreadsheet (useful when migrating to an updated sheet) while keeping the
+    original sheet and its collected responses intact.
 
-    Useful for testing or resetting the sheet.
+    Behavior:
+    - If `confirm` is False: returns an error (safety guard).
+    - If `confirm` is True and `new_sheet_id` is provided: copies columns A and B from
+      the specified `sheet_name` into the target spreadsheet's first sheet starting at A1.
+    - If `confirm` is True but `new_sheet_id` is not provided: returns an error describing
+      expected usage (we do NOT clear responses anymore).
 
     Args:
         sheet_name: Name of the sheet tab (default: "Sheet1")
-        confirm: Must be set to True to actually clear responses (safety feature)
+        confirm: Must be set to True to perform the copy/migrate operation (safety feature)
+        new_sheet_id: The destination Google Sheet ID to which questions will be copied
 
     Returns:
-        Dictionary with success status
+        Dictionary with success status and details about copied rows
     """
     if not confirm:
         return {
             "status": "error",
-            "message": "Please set confirm=True to clear all responses. This action cannot be undone."
+            "message": "Please set confirm=True to perform the questions migration. No data was changed."
+        }
+
+    if not new_sheet_id:
+        return {
+            "status": "error",
+            "message": "To avoid data loss, this operation no longer clears responses. Provide `new_sheet_id` to copy questions to the updated sheet."
         }
 
     try:
         service = get_sheets_service()
 
-        # Get the number of rows
-        range_name = f"{sheet_name}!A:A"
+        # Validate destination spreadsheet is accessible
+        try:
+            service.spreadsheets().get(spreadsheetId=new_sheet_id).execute()
+        except Exception as e:
+            return {"status": "error", "message": f"Destination sheet not accessible: {str(e)}"}
+
+        # Read questions (columns A and B) from source sheet
+        range_name = f"{sheet_name}!A:B"
         result = service.spreadsheets().values().get(
             spreadsheetId=GOOGLE_SHEET_ID,
             range=range_name
         ).execute()
 
         values = result.get('values', [])
-        num_rows = len(values)
+        if not values:
+            return {"status": "error", "message": "No questions found in the source sheet"}
 
-        if num_rows == 0:
-            return {
-                "status": "error",
-                "message": "No data found in sheet"
-            }
+        # Write questions into destination sheet starting at A1
+        dest_range = f"Sheet1!A1"
+        body = {"values": values}
 
-        # Clear columns C and D (responses and timestamps)
-        clear_range = f"{sheet_name}!C2:D{num_rows}"
-
-        service.spreadsheets().values().clear(
-            spreadsheetId=GOOGLE_SHEET_ID,
-            range=clear_range
+        service.spreadsheets().values().update(
+            spreadsheetId=new_sheet_id,
+            range=dest_range,
+            valueInputOption='RAW',
+            body=body
         ).execute()
 
         return {
             "status": "success",
-            "message": f"Cleared {num_rows - 1} responses from the sheet",
-            "rows_cleared": num_rows - 1
+            "message": f"Copied {len(values)} rows (A:B) to destination sheet {new_sheet_id}",
+            "rows_copied": len(values),
+            "source_sheet": GOOGLE_SHEET_ID,
+            "destination_sheet": new_sheet_id
         }
 
     except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to clear responses: {str(e)}"
-        }
+        return {"status": "error", "message": f"Failed to migrate questions: {str(e)}"}
 
 @mcp.tool
-async def clear_all_responses(sheet_name: str = "Sheet1", confirm: bool = False) -> dict:
-    """MCP tool wrapper for clear_all_responses"""
-    return await _clear_all_responses_impl(sheet_name, confirm)
+async def clear_all_responses(
+    sheet_name: str = "Sheet1",
+    confirm: bool = False,
+    new_sheet_id: Optional[str] = None
+) -> dict:
+    """MCP tool wrapper for clear_all_responses (now migrates questions when destination provided)"""
+    return await _clear_all_responses_impl(sheet_name, confirm, new_sheet_id)
 
 
 # ---------------- UPDATE SHEET ID ----------------
@@ -437,7 +519,8 @@ async def http_clear_all_responses(request: Request):
     body = await request.json()
     result = await _clear_all_responses_impl(
         sheet_name=body.get('sheet_name', 'Sheet1'),
-        confirm=body.get('confirm', False)
+        confirm=body.get('confirm', False),
+        new_sheet_id=body.get('new_sheet_id')
     )
     return JSONResponse(result)
 
