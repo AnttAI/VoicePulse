@@ -1,15 +1,26 @@
 # VoicePulse
 
-VoicePulse is a Next.js voice agent app with an embeddable widget and a hosted thank-you page for voice surveys.
+VoicePulse is a Next.js voice agent app with an embeddable widget and a hosted thank‑you page for voice surveys. It connects to the OpenAI Realtime API for live voice interactions.
 
-## Quick start
+## How to run
 
-- Install: `npm i`
-- Set `OPENAI_API_KEY` in `.env` (copy from `.env.sample` if needed)
-- Run: `npm run dev`
-- App: http://localhost:3000
-- Widget page: http://localhost:3000/widget
-- Thank-you page: http://localhost:3000/thank-you/
+```bash
+npm i
+cp .env.sample .env
+# add OPENAI_API_KEY in .env
+npm run dev
+```
+
+App: http://localhost:3000  
+Widget page: http://localhost:3000/widget  
+Thank-you page: http://localhost:3000/thank-you/index.html
+
+## Demo steps
+
+1) Open http://localhost:3000/thank-you/index.html  
+2) Click “Share your feedback”  
+3) When the agent connects, say: “I liked the event, but the audio setup could be improved.”  
+4) The agent should respond and continue the conversation.
 
 ## Embeddable widget
 
